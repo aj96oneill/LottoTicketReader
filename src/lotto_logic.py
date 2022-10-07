@@ -18,47 +18,92 @@ class Lotto():
 class MegaMillions(Lotto):
     def __init__(self, ticket) -> None:
         super().__init__(ticket)
+        self.lotto = "MegaMillions"
     
     def get_nums(self):
         """
         Get the winning numbers
+        https://rapidapi.com/avoratechnology/api/mega-millions
         """
         if os.path.exists("./account.json"):
             account = json.load(open("./account.json", "r"))
-            url = "https://mega-millions.p.rapidapi.com/latest"
+            now = datetime.now()
+            diff_today = now - self.ticket.date
+            if self.ticket.date.strftime("%a").lower() == "fri" and diff_today.days > 0 and  diff_today.days < 4 or self.ticket.date.strftime("%a").lower() == "tue" and diff_today.days > 0 and  diff_today.days < 5:
+                url = "https://mega-millions.p.rapidapi.com/latest"
 
-            headers = {
-                "X-RapidAPI-Key": account["MegaMillions"]["API-key"],
-                "X-RapidAPI-Host": "mega-millions.p.rapidapi.com"
-            }
-            # print(datetime.strptime("2022-09-30T00:00:00.000Z", '%Y-%m-%dT%H:%M:%S.%fZ'))
-            # print(datetime.now(timezone.utc))
-            # print(datetime.now() - datetime.strptime("2022-09-30T00:00:00.000Z", '%Y-%m-%dT%H:%M:%S.%fZ'))
+                headers = {
+                    "X-RapidAPI-Key": account[self.lotto]["API-key"],
+                    "X-RapidAPI-Host": "mega-millions.p.rapidapi.com"
+                }
+                #response = requests.request("GET", url, headers=headers)
+                #res = response.json()
+                res = {"data":[{
+                "DrawingDate":"2021-11-09T00:00:00.000Z",
+                "FirstNumber":9,
+                "SecondNumber":14,
+                "ThirdNumber":16,
+                "FourthNumber":26,
+                "FifthNumber":49,
+                "MegaBall":14,
+                "Megaplier":3,
+                "JackPot":"$45,000,000",
+                "NumberSet":"9 14 16 26 49 14 3x"
+            }]}
+            else:
+                q_date = self.ticket.date.strftime("%Y-%m-%d")
+                url = "https://mega-millions.p.rapidapi.com/"+q_date
 
-            response = {"data":[{}]}#requests.request("GET", url, headers=headers)
+                querystring = {"DrawingDate":q_date}
 
-            # status:"success"
-            # data:[{
-            #     DrawingDate:"2021-11-09T00:00:00.000Z"
-            #     FirstNumber:9
-            #     SecondNumber:14
-            #     ThirdNumber:16
-            #     FourthNumber:26
-            #     FifthNumber:49
-            #     MegaBall:14
-            #     Megaplier:3
-            #     JackPot:"$45,000,000"
-            #     NumberSet:"9 14 16 26 49 14 3x"
-            # }]
-            #print(response)
-            data = response["data"][0]
-            # self.nums = [data["FirstNumber"], data["SecondNumber"], data["ThirdNumber"], data["FourthNumber"], data["FifthNumber"], data["MegaBall"]]
-            self.nums = ["9", "14", "16", "26", "49", "14"]
+                headers = {
+                    "X-RapidAPI-Key": account[self.lotto]["API-key"],
+                    "X-RapidAPI-Host": "mega-millions.p.rapidapi.com"
+                }
+
+                # response = requests.request("GET", url, headers=headers, params=querystring)
+                # res = response.json()
+                res = {"data":[{
+                "DrawingDate":"2022-08-26T00:00:00.000Z",
+                "FirstNumber":"9",
+                "SecondNumber":"14",
+                "ThirdNumber":"16",
+                "FourthNumber":"26",
+                "FifthNumber":"49",
+                "MegaBall":"14",
+                "Megaplier":"3",
+                "JackPot":"$45,000,000",
+                "NumberSet":"9 14 16 26 49 14 3x"
+            }]}
+
+            data = res["data"][0]
+            self.nums = data["NumberSet"].split(" ")[0:6]
+            with open('nums.json', 'w') as f:
+                json.dump({
+                    "date": data["DrawingDate"],
+                    "nums": self.nums
+                }, f)
         else:
             print("Need an account.json file with api keys")
 
     def check_nums(self):
-        if len(self.nums) == 0: self.get_nums()
+        #if tix date is older than today then look up numbers
+        now = datetime.now()
+        diff_today = now - self.ticket.date
+        if diff_today.days > 0:
+            if os.path.exists("./nums.json"):
+                num_file = json.load(open("./nums.json", "r"))
+                diff_drawing = now - datetime.strptime(num_file["date"], '%Y-%m-%dT%H:%M:%S.%fZ')
+                # if date from saved data = date from ticket
+                if diff_today.days == diff_drawing.days:
+                    self.nums = num_file["nums"]
+                else:
+                    self.get_nums()
+            else:
+                self.get_nums()
+        #if tix date hasn't happened yet, return 
+        else:
+            return "Ticket numbers have not been drawn yet"
         for i in range(0,len(self.ticket.nums)):
             for j in range(0,5):
                 if self.ticket.nums[i][j] in self.nums[0:6]:
@@ -70,9 +115,3 @@ class MegaMillions(Lotto):
             else:
                 self.ticket.rois['MegaBall']["win"].insert(0,False)
         self.ticket.save_results()
-
-if __name__ == "__main__":
-    ticket = ""
-    lotto = MegaMillions(ticket)
-    lotto.get_nums()
-    print(lotto.nums)

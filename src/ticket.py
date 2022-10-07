@@ -1,6 +1,8 @@
 import numpy as np
+from datetime import datetime, timedelta, timezone
 import cv2
 import imutils
+from imutils import contours
 
 from tensorflow.keras.models import load_model
 
@@ -11,13 +13,14 @@ class Ticket():
         self.nums = []
         self.date = ""
         self.model = load_model('my_model_chars_74')
+        self.model_mnist = load_model('my_model')
         self.model_alphabet = load_model('my_model_alphabet')
         self.mapping = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']
         self.rois = {}
         for i in range(1,6):
-            self.rois[f"col{i}"] = {"img":[], "info":[], "predictions":[], "win":[]}
-        self.rois["MegaBall"] = {"img":[], "info":[], "predictions":[], "win":[]}
-        self.rois["DateOfDrawing"] = {"img":[], "info":[], "predictions":[]}
+            self.rois[f"col{i}"] = {"img":[], "info":[], "predictions":[], "confident":[], "win":[]}
+        self.rois["MegaBall"] = {"img":[], "info":[], "predictions":[], "confident":[], "win":[]}
+        self.rois["DateOfDrawing"] = {"img":[], "info":[], "predictions":[], "confident":[]}
 
     def find_rois(self) -> bool:
         image = cv2.imread(self.image)
@@ -68,44 +71,49 @@ class Ticket():
                 self.rois["DateOfDrawing"]["img"].append(thresh[y:y + h, x:x + w])
                 self.rois["DateOfDrawing"]["info"].append(c)
         return True
+
+    def predict(self, model, image):
+        im1 = cv2.resize(image, dsize=(28, 28))
+        im1_array = np.array(im1) / 255.0
+        return model.predict(im1_array.reshape(1, 28, 28, 1))
     
     def extract_info(self) -> bool:        
         for key in list(self.rois.keys()):
             if key == "DateOfDrawing":
                 for img in self.rois[key]["img"]:
-                    # cv2.imshow('roi', img)
-                    height, width = img.shape
-                    results = []
-                    #Gets the first 3 letters
-                    for i in range(0,3):
-                        imi = img[0:height, int(i * width / 16):int((i+1)*width/16)]
-                        imi = cv2.resize(imi, dsize=(28, 28))
-                        imi_array = np.array(imi) / 255.0
-                        pred1 = self.model_alphabet.predict(imi_array.reshape(1, 28, 28, 1))
-                        results.append(self.mapping[pred1.argmax()])
-                    # for i in range(0,3):
-                    #     imi = img[0:height, int((width / 5)+ i * width / 15):int((width / 5)+ i+1 * width / 15)]
-                    #     cv2.imshow('imi', imi)
-                    #     cv2.waitKey()
-                    #     return
-                    #     imi = cv2.resize(imi, dsize=(28, 28))
-                    #     imi_array = np.array(imi) / 255.0
-                    #     pred1 = model_alphabet.predict(imi_array.reshape(1, 28, 28, 1))
-                    #     results.append(mapping[pred1.argmax()])
-                    # print(results)
-                    # print(nums)
-                    # cv2.imshow('roi', img)
-                    # cv2.waitKey()
+                    # cv2.imshow('img', img)
+
+                    cnts = cv2.findContours(img.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+                    cnts = imutils.grab_contours(cnts)
+                    (cnts, _) = contours.sort_contours(cnts, method="left-to-right")
+                    result = []
+                    conf = 1
+                    for c in cnts:
+                        (x, y, w, h) = cv2.boundingRect(c)
+                        if w > 10 and h > 15:
+                            temp = img[y:y + h, x:x + w]
+                            if len(result) < 6:
+                                pred = self.predict(self.model_alphabet, temp)
+                                conf *= pred.max()
+                                result.append(self.mapping[pred.argmax()])
+                            else:
+                                pred = self.predict(self.model, temp)
+                                conf *= pred.max()
+                                result.append(f"{pred.argmax()}")
+                    date = datetime.strptime("".join(result), '%a%b%d%Y')
+                    self.rois[key]["predictions"].append(date)
+                    self.rois[key]["confident"].append(conf > 0.6)
+                self.date =  self.rois[key]["predictions"][0]
 
             else:
-                for im in self.rois[key]["img"]:
+                for img in self.rois[key]["img"]:
                     #https://opencv24-python-tutorials.readthedocs.io/en/latest/py_tutorials/py_imgproc/py_morphological_ops/py_morphological_ops.html
                         
-                    # kernel = np.ones((4,4),np.uint8)
-                    kernel = np.ones((2,2),np.uint8)
-                    dilation = cv2.dilate(im,kernel,iterations = 1)
-                    # cv2.imshow('dialation', dilation)
-                    img = cv2.morphologyEx(dilation, cv2.MORPH_CLOSE, kernel)
+                    # # kernel = np.ones((4,4),np.uint8)
+                    # kernel = np.ones((2,2),np.uint8)
+                    # # dilation = cv2.dilate(img,kernel,iterations = 1)
+                    # # cv2.imshow('dialation', dilation)
+                    # img = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
                     #cv2.imshow('closing', closing)
                     # kernel = np.ones((2,2),np.uint8)
                     # erosion = cv2.erode(closing,kernel,iterations = 1)
@@ -114,25 +122,27 @@ class Ticket():
                     #closing2 = cv2.morphologyEx(erosion, cv2.MORPH_CLOSE, kernel)
                     #cv2.imshow('closing2', closing2)
 
-                    # if key == "MegaBall":
-                    #     cv2.imshow('before', im)
-                    #     cv2.imshow('after', img)
-                    #     cv2.waitKey()
-
                     #cv2.imshow('roi', img)
-                    height, width = img.shape
-                    im1 = img[0:height, 0:int(width/2)]
-                    im2 = img[0:height, int(width/2):width]
-                    im1 = cv2.resize(im1, dsize=(28, 28))
-                    im1_array = np.array(im1) / 255.0
-                    im2 = cv2.resize(im2, dsize=(28, 28))
-                    im2_array = np.array(im2) / 255.0
-                    #cv2.imshow('img', img)
-                    pred1 = self.model.predict(im1_array.reshape(1, 28, 28, 1))
-                    pred2 = self.model.predict(im2_array.reshape(1, 28, 28, 1))
-                    #print(f"{'' if pred1.argmax() == 0 else pred1.argmax()}{pred2.argmax()}")
-                    #cv2.waitKey()
-                    self.rois[key]["predictions"].append(f"{'' if pred1.argmax() == 0 else pred1.argmax()}{pred2.argmax()}")
+                    cnts = cv2.findContours(img.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+                    cnts = imutils.grab_contours(cnts)
+                    (cnts, _) = contours.sort_contours(cnts, method="left-to-right")
+                    result = []
+                    conf = 1
+                    for c in cnts:
+                        (x, y, w, h) = cv2.boundingRect(c)
+                        if w > 10 and h > 15:
+                            temp = img[y:y + h, x:x + w]
+                            pred = self.predict(self.model, temp)
+                            conf *= pred.max()
+                            result.append(f"{'' if pred.argmax() == 0 and len(result) == 0 else pred.argmax()}")
+                    # print("".join(result))
+                    # if not conf > 0.7:
+                    #     print(conf)
+                    #     print("".join(result))
+                    #     cv2.imshow('img', img)
+                    #     cv2.waitKey()
+                    self.rois[key]["predictions"].append("".join(result))
+                    self.rois[key]["confident"].append(conf > 0.6)
         return True
 
     def generate_nums(self) -> bool:
@@ -158,9 +168,17 @@ class Ticket():
         for key in list(self.rois.keys()): 
             if key != "DateOfDrawing":
                 for i in range(0,len(self.rois[key]["win"])):
+                    if not self.rois[key]["confident"][i]:
+                        c = self.rois[key]["info"][i]
+                        cv2.drawContours(image, [c], 0, (0,255,255), 5, lineType=cv2.LINE_8)
                     if self.rois[key]["win"][i]:
                         c = self.rois[key]["info"][i]
                         cv2.drawContours(image, [c], 0, (0,255,0), 3)
+            else:
+                for i in range(0,len(self.rois[key]["predictions"])):
+                    if not self.rois[key]["confident"][i]:
+                        c = self.rois[key]["info"][i]
+                        cv2.drawContours(image, [c], 0, (0,255,255), 5, lineType=cv2.LINE_8)
         # cv2.imshow('results', image)
         # cv2.waitKey()
         fn = self.image.replace("_output.png", "_results.png")
