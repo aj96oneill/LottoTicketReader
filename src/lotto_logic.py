@@ -87,6 +87,7 @@ class MegaMillions(Lotto):
             print("Need an account.json file with api keys")
 
     def check_nums(self):
+        print("Checking numbers")
         #if tix date is older than today then look up numbers
         now = datetime.now()
         diff_today = now - self.ticket.date
@@ -106,7 +107,7 @@ class MegaMillions(Lotto):
             return "Ticket numbers have not been drawn yet"
         for i in range(0,len(self.ticket.nums)):
             for j in range(0,5):
-                if self.ticket.nums[i][j] in self.nums[0:6]:
+                if self.ticket.nums[i][j] in self.nums[0:5]:
                     self.ticket.rois[f'col{j+1}']["win"].insert(0,True)
                 else:
                     self.ticket.rois[f'col{j+1}']["win"].insert(0,False)
